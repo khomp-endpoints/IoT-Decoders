@@ -4,7 +4,7 @@ function decodeUplink(input) {
         };   
 }
 function datalog(i,bytes){
-  var aa=(bytes[0+i]&0x08)?"COUNT3x":"CPL01";
+  var aa=(bytes[0+i]&0x08)?"CPL03":"CPL01";
   var bb=(bytes[0+i]&0x20)?"PART":"SUM";
   var cc=(bytes[0+i]&0x10)?"YES":"NO"; 
   var dd=(bytes[0+i]&0x02)?"TRUE":"FALSE"; 
@@ -95,7 +95,7 @@ function Decode(fPort, bytes, variables) {
     var sensor;
     
     if(bytes[0]==0x20)
-      sensor= "Contador de pulso";
+      sensor= "CPL03-LB";
       
     if(bytes[4]==0xff)
       sub_band="NULL";
@@ -142,9 +142,20 @@ function Decode(fPort, bytes, variables) {
     BAT:bat,
     };
   }
+  else if(fPort==0x07)
+  {
+    var decode={};
+    decode.EXTI_PA8_Trigger= (bytes[0] & 0x02)? "TRUE":"FALSE";  
+    decode.EXTI_PA8_Status= (bytes[0] & 0x01)? "CLOSE":"OPEN"; 
+    decode.EXTI_PA4_Trigger= (bytes[0] & 0x08)? "TRUE":"FALSE";
+    decode.EXTI_PA4_Status= (bytes[0] & 0x04)? "CLOSE":"OPEN"; 
+    decode.EXTI_PB15_Trigger= (bytes[0] & 0x20)? "TRUE":"FALSE";
+    decode.EXTI_PB15_Status= (bytes[0] & 0x10)? "CLOSE":"OPEN";
+    return decode;
+  }
   else
   { 
-    var work_mod=(bytes[0]&0x08)?"COUNT3x":"CPL01";
+    var work_mod=(bytes[0]&0x08)?"CPL03":"CPL01";
     var count_mod=(bytes[0]&0x20)?"PART":"SUM"; 
     var tdc_interval=(bytes[0]&0x10)?"YES":"NO";   
     var ttrig_mod=(bytes[0]&0x04)>>2; 
@@ -157,8 +168,11 @@ function Decode(fPort, bytes, variables) {
     var pa8_total_pulse=bytes[1]<<16 | bytes[2]<<8 | bytes[3];
     var pa4_total_pulse=bytes[4]<<16 | bytes[5]<<8 | bytes[6];
     var pb15_total_pulse=bytes[7]<<16 | bytes[8]<<8 | bytes[9];
+    var pa8_roc_flag=(bytes[10]&0x01)?"TRUE":"FALSE";
+    var pa4_roc_flag=(bytes[10]&0x02)?"TRUE":"FALSE";
+    var pb15_roc_flag=(bytes[10]&0x04)?"TRUE":"FALSE";
     
-    if(bytes.length==11)
+    if(work_mod=="CPL01")
     {
       return {
       WORKMOD:work_mod,       
@@ -172,7 +186,7 @@ function Decode(fPort, bytes, variables) {
       TIME:data_time
       };
     }
-    else if(bytes.length==10)
+    else if(work_mod=="CPL03")
     {
       return {
       WORKMOD:work_mod,
@@ -181,7 +195,10 @@ function Decode(fPort, bytes, variables) {
       CALCULATE_FLAG:calculate_flag,
       PA8_TOTAL_PULSE:pa8_total_pulse,
       PA4_TOTAL_PULSE:pa4_total_pulse,
-      PB15_TOTAL_PULSE:pb15_total_pulse
+      PB15_TOTAL_PULSE:pb15_total_pulse,
+      PA8_ROC:pa8_roc_flag,
+      PA4_ROC:pa4_roc_flag,
+      PB15_ROC:pb15_roc_flag
       };      
     }
   }
