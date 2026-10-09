@@ -1,0 +1,159 @@
+function decodeUplink(input) {
+  return { 
+    data: Decode(input.fPort, input.bytes, input.variables)
+  };   
+}
+
+function datalog(i, bytes) {
+  var aa = parseFloat(((bytes[4 + i] << 24 >> 16 | bytes[5 + i]) / 10).toFixed(1)); 
+  var bb = parseFloat(((bytes[2 + i] << 24 >> 16 | bytes[3 + i]) / 10).toFixed(1));
+  var cc = (bytes[6 + i] & 0x02) ? "Alto" : "Baixo";
+  var dd = (bytes[6 + i] & 0x01) ? "Fechado" : "Aberto";
+  var ee = getMyDate((bytes[7 + i] << 24 | bytes[8 + i] << 16 | bytes[9 + i] << 8 | bytes[10 + i]).toString(10));
+  
+  return '[' + aa + ',' + bb + ',' + cc + ',' + dd + ',' + ee + '],';  
+}
+
+function getzf(c_num) { 
+  if (parseInt(c_num, 10) < 10) {
+    c_num = '0' + c_num; 
+  }
+  return c_num; 
+}
+
+function getMyDate(str) { 
+  var c_Date;
+  var numStr = parseInt(str, 10);
+  if (numStr > 9999999999) {
+    c_Date = new Date(numStr);
+  } else {
+    c_Date = new Date(numStr * 1000);
+  }
+  
+  var c_Year = c_Date.getFullYear();
+  var c_Month = c_Date.getMonth() + 1;
+  var c_Day = c_Date.getDate();
+  var c_Hour = c_Date.getHours();
+  var c_Min = c_Date.getMinutes();
+  var c_Sen = c_Date.getSeconds();
+  
+  return c_Year + '-' + getzf(c_Month) + '-' + getzf(c_Day) + ' ' + getzf(c_Hour) + ':' + getzf(c_Min) + ':' + getzf(c_Sen); 
+}
+
+function Decode(fPort, bytes, variables) {
+  if (!bytes || bytes.length === 0) return {};
+
+  // Modo Padrão (Porta 2)
+  if (fPort === 2) {
+    var decode = {};
+    decode.tensao_bateria = (bytes[0] << 8 | bytes[1]) / 1000;
+    
+    // Mapeamento do contato seco e interrupção
+    decode.flag_interrupcao = (bytes[2] & 0x01) ? "SIM" : "NÃO";
+    decode.estado_contato_seco = (bytes[2] & 0x02) ? "FECHADO" : "ABERTO";
+    
+    // Flags de violação dos limites de temperatura
+    decode.flag_temperatura_max_ch1 = (bytes[2] & 0x10) ? "SIM" : "NÃO";
+    decode.flag_temperatura_min_ch1 = (bytes[2] & 0x20) ? "SIM" : "NÃO";
+    decode.flag_temperatura_max_ch2 = (bytes[2] & 0x04) ? "SIM" : "NÃO";
+    decode.flag_temperatura_min_ch2 = (bytes[2] & 0x08) ? "SIM" : "NÃO";
+
+    var temp1_p2 = parseFloat((((bytes[3] << 24 >> 16) | bytes[4]) / 10).toFixed(1)); 
+    var temp2_p2 = parseFloat((((bytes[5] << 24 >> 16) | bytes[6]) / 10).toFixed(1));
+    
+    decode.temperatura_ch1 = (temp1_p2 > 2000 || temp1_p2 < -2000) ? 0 : temp1_p2;
+    decode.temperatura_ch2 = (temp2_p2 > 2000 || temp2_p2 < -2000) ? 0 : temp2_p2;
+
+    decode.data_hora = getMyDate((bytes[7] << 24 | bytes[8] << 16 | bytes[9] << 8 | bytes[10]).toString(10));
+    decode.modelo = "DTL-300-PT-100";
+
+    return decode;
+  }
+  
+  // Modo de Amostragem Contínua (MOD=2) - Porta 7
+  else if (fPort === 7) {
+    var batV7 = (bytes[0] << 8 | bytes[1]) / 1000;
+    var datalogStr7 = "";
+    
+    var total_samples = Math.floor((bytes.length - 2) / 4);
+
+    for (var i = 0; i < total_samples; i++) {
+      var base = 2 + (i * 4);
+
+      // Canal 1
+      var rawT1 = (bytes[base] << 24 >> 16) | bytes[base + 1];
+      var temp1 = parseFloat((rawT1 / 10).toFixed(1));
+      if (temp1 > 2000 || temp1 < -2000) temp1 = 0;
+
+      // Canal 2
+      var rawT2 = (bytes[base + 2] << 24 >> 16) | bytes[base + 3];
+      var temp2 = parseFloat((rawT2 / 10).toFixed(1));
+      if (temp2 > 2000 || temp2 < -2000) temp2 = 0;
+
+      datalogStr7 += '[' + temp1 + ',' + temp2 + ']';
+    }
+
+    return {
+      modelo: "DTL-300-PT-100",
+      tensao_bateria: batV7,
+      historico_dados: datalogStr7
+    };
+  }
+
+  // Datalog Perdas/Histórico (Porta 3)
+  else if (fPort === 3) {
+    var pnack = ((bytes[6] >> 7) & 0x01) ? "Verdadeiro" : "Falso";
+    var datalogStr3 = "";
+
+    for (var j = 0; j + 11 <= bytes.length; j += 11) {
+      datalogStr3 += datalog(j, bytes);
+    }
+
+    return {
+      modelo: "DTL-300-PT-100",
+      historico_dados: datalogStr3,
+      modo_pnack: pnack
+    };    
+  }
+
+  // Informações de Firmware e Frequência (Porta 5)
+  else if (fPort === 5) {
+    var freq_band;
+    var sub_band;
+    var sensor = "DTL-300-PT-100";
+
+    var firm_ver = (bytes[1] & 0x0f) + '.' + ((bytes[2] >> 4) & 0x0f) + '.' + (bytes[2] & 0x0f);
+
+    switch (bytes[3]) {
+      case 0x01: freq_band = "EU868"; break;
+      case 0x02: freq_band = "US915"; break;
+      case 0x03: freq_band = "IN865"; break;
+      case 0x04: freq_band = "AU915"; break;
+      case 0x05: freq_band = "KZ865"; break;
+      case 0x06: freq_band = "RU864"; break;
+      case 0x07: freq_band = "AS923"; break;
+      case 0x08: freq_band = "AS923_1"; break;
+      case 0x09: freq_band = "AS923_2"; break;
+      case 0x0A: freq_band = "AS923_3"; break;
+      case 0x0B: freq_band = "CN470"; break;
+      case 0x0C: freq_band = "EU433"; break;
+      case 0x0D: freq_band = "KR920"; break;
+      case 0x0E: freq_band = "MA869"; break;
+      case 0x0F: freq_band = "AS923_4"; break;
+      default: freq_band = "DESCONHECIDO"; break;
+    }
+
+    sub_band = (bytes[4] === 0xff) ? "NULO" : (bytes[4] + 1).toString();
+    var bat5 = (bytes[5] << 8 | bytes[6]) / 1000;
+
+    return {
+      modelo: sensor,
+      versao_firmware: firm_ver,
+      banda_frequencia: freq_band,
+      sub_banda: sub_band,
+      tensao_bateria: bat5
+    };
+  }
+
+  return {};
+}
